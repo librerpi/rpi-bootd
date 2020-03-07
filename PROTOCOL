@@ -1,0 +1,41 @@
+The raspi presents 2 endpoints, depending on what's already on the device this will be on interface 0 or 1.
+If there's only 1 interface, interface 0 is used for boot, otherwise interface 1 is used.
+
+Two endpoints are presented:
+	out_ep	used for sending data TO the raspi, endpoint 1 on interface 0, 3 on interface 1
+	in_ep	used for receiving commands FROM the raspi, endpoint 2 on interface 0, 4 on interface 1
+
+Communication is done via messages, each message consists of a control transfer specifying the length of the message
+followed by the actual message sent as one or more bulk transfers to out_ep.
+
+Messages FROM the raspi are read by executing a control transfer and reading the results.
+
+After the device starts up and is enumerated, the host sends a boot message consisting of an integer specifying
+length of the bootcode.bin and 20 bytes for the signature (normally not used).
+
+After the boot message is sent, a second message is sent consisting of the raw contents of bootcode.bin.
+The host is then expected to read a new message from the device containing an error code - if not 0, boot failed.
+
+Once bootcode is sent, it begins running, at this point the official bootcode then begins to use the host as a file
+server.
+
+The host is expected to repeatedly read messages from the raspi consisting of an integer with a command code and 256
+bytes specifying a filename.
+
+Command codes are one of the following:
+	0	Get file size
+	1	Read file
+	2	Done
+
+
+Get file size:
+	If the filename is valid, a single control transfer is expected containing the file size
+	On error, such as file not found, a 0-length message is sent
+
+Read file:
+	If the filename is valid, a message is sent containing the raw contents of the file
+	On error, a 0-length message is sent
+
+Done:
+	This command indicates to the host that the device is finished with the boot process, usually after this
+	message is sent, the host should close the device and await the device OS to enumerate again if required

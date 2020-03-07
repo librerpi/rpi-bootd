@@ -11,18 +11,22 @@ static int in_ep;
 
 int ep_write(void *buf, int len, libusb_device_handle * usb_device)
 {
-	int a_len = 0;
-	int sending, sent;
+	static int a_len = 0;
+	static int sending = 0;
+	static int sent = 0;
 	int ret =
 	    libusb_control_transfer(usb_device, LIBUSB_REQUEST_TYPE_VENDOR, 0,
 				    len & 0xffff, len >> 16, NULL, 0, 1000);
 
 	if(ret != 0)
 	{
-		printf("Failed control transfer (%d,%d)\n", ret, len);
+		log_info("Failed control transfer (%d,%d)\n", ret, len);
 		return ret;
 	}
 
+	a_len   = 0;
+	sent    = 0;
+	sending = 0;
 	while(len > 0)
 	{
 		sending = len < LIBUSB_MAX_TRANSFER ? len : LIBUSB_MAX_TRANSFER;
@@ -33,7 +37,7 @@ int ep_write(void *buf, int len, libusb_device_handle * usb_device)
 		buf += sent;
 		len -= sent;
 	}
-	fprintf(stderr,"libusb_bulk_transfer sent %d bytes; returned %d\n", a_len, ret);
+	log_info("libusb_bulk_transfer sent %d bytes; returned %d\n", a_len, ret);
 
 	return a_len;
 }
@@ -75,14 +79,14 @@ int second_stage_prep(FILE *fp, FILE *fp_sig)
 	second_stage_txbuf = (uint8_t *) malloc(boot_message.length);
 	if (second_stage_txbuf == NULL)
 	{
-		printf("Failed to allocate memory\n");
+		log_info("Failed to allocate memory\n");
 		return -1;
 	}
 
 	size = fread(second_stage_txbuf, 1, boot_message.length, fp);
 	if(size != boot_message.length)
 	{
-		printf("Failed to read second stage\n");
+		log_info("Failed to read second stage\n");
 		return -1;
 	}
 
@@ -97,15 +101,15 @@ int second_stage_boot(libusb_device_handle *usb_device)
 	size = ep_write(&boot_message, sizeof(boot_message), usb_device);
 	if (size != sizeof(boot_message))
 	{
-		printf("Failed to write correct length, returned %d\n", size);
+		log_info("Failed to write correct length, returned %d\n", size);
 		return -1;
 	}
 
-	fprintf(stderr,"Writing %d bytes\n", boot_message.length);
+	log_info("Writing %d bytes\n", boot_message.length);
 	size = ep_write(second_stage_txbuf, boot_message.length, usb_device);
 	if (size != boot_message.length)
 	{
-		printf("Failed to read correct length, returned %d\n", size);
+		log_info("Failed to read correct length, returned %d\n", size);
 		return -1;
 	}
 
@@ -114,11 +118,11 @@ int second_stage_boot(libusb_device_handle *usb_device)
 
 	if (size > 0 && retcode == 0)
 	{
-		printf("Successful read %d bytes \n", size);
+		log_info("Successful read %d bytes \n", size);
 	}
 	else
 	{
-		printf("Failed : 0x%x\n", retcode);
+		log_info("Failed : 0x%x\n", retcode);
 	}
 
 	return retcode;
@@ -142,16 +146,17 @@ static void usbboot_init_raspi(libusb_device_handle *dev_handle) {
 	}
 
 	if(libusb_claim_interface(dev_handle, interface)) {
-		fprintf(stderr,"Failed to claim interface!\n");
+		log_info("Failed to claim interface!\n");
 		libusb_close(dev_handle);
 	}
 }
 
 static libusb_device_handle *handle = NULL;
+static 	struct libusb_device_descriptor  desc;
 
 static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *dev,
 			libusb_hotplug_event event, void* user_data) {
-	struct libusb_device_descriptor  desc;
+
 	
 	libusb_get_device_descriptor(dev, &desc);
 
@@ -160,19 +165,19 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 	if(event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
 		rc = libusb_open(dev, &handle);
 		if (rc != LIBUSB_SUCCESS) {
-			fprintf(stderr, "Could not open USB device!\n");
+			log_info("Could not open USB device!\n");
 		} else {
-			fprintf(stderr, "Found device!\n");
+			log_info("Found device!\n");
 
 		}
 	} else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
 		if(handle) {
-			fprintf(stderr, "Closing device!\n");
+			log_info( "Closing device!\n");
 			libusb_close(handle);
 			handle = NULL;
 		}
 	} else {
-		fprintf(stderr, "Unknown event %d\n", event);
+		log_info("Unknown event %d\n", event);
 	}
 	return 0;
 
@@ -196,8 +201,11 @@ int usbboot_init() {
 		libusb_handle_events(NULL);
 		if(handle) {
 			usbboot_init_raspi(handle);
-			second_stage_boot(handle);
-			break;
+			if(desc.iSerialNumber == 0 || desc.iSerialNumber == 3) {
+				second_stage_boot(handle);
+			}
+			libusb_close(handle);
+			handle = NULL;
 		}
 	}
 }
