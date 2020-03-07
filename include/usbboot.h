@@ -3,4 +3,4 @@
 
 int usbboot_init();
 void usbboot_shutdown();
-
+void usbboot_exit();

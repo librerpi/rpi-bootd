@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <utils.h>
+#include <unistd.h>
 
 #define RASPI_VENDOR_ID 0x0a5c
 #define LIBUSB_MAX_TRANSFER (16 * 1024)
@@ -11,9 +12,9 @@ static int in_ep;
 
 int ep_write(void *buf, int len, libusb_device_handle * usb_device)
 {
-	static int a_len = 0;
-	static int sending = 0;
-	static int sent = 0;
+	int a_len = 0;
+	int sending = 0;
+	int sent = 0;
 	int ret =
 	    libusb_control_transfer(usb_device, LIBUSB_REQUEST_TYPE_VENDOR, 0,
 				    len & 0xffff, len >> 16, NULL, 0, 1000);
@@ -93,25 +94,144 @@ int second_stage_prep(FILE *fp, FILE *fp_sig)
 	return 0;
 }
 
+void async_bootmsg_send_data(struct libusb_transfer *xfr);
+
+// TODO - write a generic function for building control transfers and bulk transfers, with arbitrary user data and callback
+
+// starts an async boot
+void async_boot_start(libusb_device_handle *usb_device) {
+     log_info("ASync boot started");
+     struct libusb_transfer *xfr;
+
+     // we start by sending the boot message control transfer
+     xfr = libusb_alloc_transfer(0);
+     if(!xfr) {
+	log_info("Async boot: failed to allocate transfer!");
+	return;
+     }
+
+     unsigned char* buffer = malloc(LIBUSB_CONTROL_SETUP_SIZE);
+     if(!buffer) {
+	log_info("Async boot: failed to allocate buffer!");
+	return;
+     }
+
+     int len = sizeof(boot_message);
+
+     libusb_fill_control_setup(buffer, LIBUSB_REQUEST_TYPE_VENDOR, 0, len & 0xffff, len >> 16, 0);
+     libusb_fill_control_transfer(xfr, usb_device, buffer, async_bootmsg_send_data, &boot_message, 1000);
+     xfr->flags = LIBUSB_TRANSFER_FREE_BUFFER;
+
+     int ret = libusb_submit_transfer(xfr);
+     if(ret < 0) {
+	libusb_free_transfer(xfr);
+     }
+//     int ret =
+//	    libusb_control_transfer(usb_device, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+//				    len & 0xffff, len >> 16, NULL, 0, 1000);
+
+     
+}
+
+void async_bootcode_send(struct libusb_transfer *xfr);
+
+void async_bootcode_send_data(struct libusb_transfer *xfr);
+// send the boot message as a single bulk transfer
+void async_bootmsg_send_data(struct libusb_transfer *xfr) {
+	log_info("Async bootmsg_send_data");
+	struct libusb_transfer *bootmsg_bulk_transfer; // don't want to confuse with xfr
+
+	bootmsg_bulk_transfer = libusb_alloc_transfer(0);
+	if(!bootmsg_bulk_transfer) {
+	   log_info("Async boot: failed to allocate bulk transfer");
+	}
+	libusb_fill_bulk_transfer(bootmsg_bulk_transfer, xfr->dev_handle, out_ep, (unsigned char*)&boot_message, sizeof(boot_message), async_bootcode_send, NULL, 1000);
+	bootmsg_bulk_transfer->type = LIBUSB_TRANSFER_TYPE_BULK;
+	int ret = libusb_submit_transfer(bootmsg_bulk_transfer);
+        if(ret < 0) {
+	   libusb_free_transfer(bootmsg_bulk_transfer);
+	}
+	libusb_free_transfer(xfr);
+}
+
+// called when a message is read
+void async_boot_recv_cb(struct libusb_transfer *xfr) {
+}
+
+void async_bootcode_send(struct libusb_transfer *xfr) {
+     log_info("async_bootcode_send");
+   	struct libusb_transfer *bootcode_xfr;
+
+     bootcode_xfr = libusb_alloc_transfer(0);
+     if(!bootcode_xfr) {
+	log_info("Async boot: failed to allocate transfer!");
+	return;
+     }
+
+     unsigned char* buffer = malloc(LIBUSB_CONTROL_SETUP_SIZE);
+     if(!buffer) {
+	log_info("Async boot: failed to allocate buffer!");
+	return;
+     }
+
+     int len = boot_message.length;
+
+     libusb_fill_control_setup(buffer, LIBUSB_REQUEST_TYPE_VENDOR, 0, len & 0xffff, len >> 16, 0);
+     libusb_fill_control_transfer(bootcode_xfr, xfr->dev_handle, buffer, async_bootcode_send_data, NULL, 1000);
+     bootcode_xfr->flags = LIBUSB_TRANSFER_FREE_BUFFER;
+
+     int ret = libusb_submit_transfer(bootcode_xfr);
+     if(ret < 0) {
+	libusb_free_transfer(bootcode_xfr);
+     }
+     libusb_free_transfer(xfr);
+}
+
+void async_boot_finish(struct libusb_transfer *xfr);
+
+void async_bootcode_send_data(struct libusb_transfer *xfr) {
+	log_info("Async bootcode_send_data");
+	struct libusb_transfer *bootcode_bulk_transfer; // don't want to confuse with xfr
+
+	bootcode_bulk_transfer = libusb_alloc_transfer(0);
+	if(!bootcode_bulk_transfer) {
+	   log_info("Async boot: failed to allocate bulk transfer");
+	}
+	libusb_fill_bulk_transfer(bootcode_bulk_transfer, xfr->dev_handle, out_ep, (unsigned char*)second_stage_txbuf, boot_message.length, async_boot_finish, NULL, 20000);
+	bootcode_bulk_transfer->type = LIBUSB_TRANSFER_TYPE_BULK;
+	int ret = libusb_submit_transfer(bootcode_bulk_transfer);
+        if(ret < 0) {
+	   libusb_free_transfer(bootcode_bulk_transfer);
+	}
+	libusb_free_transfer(xfr);
+
+}
+
+bool async_done = false;
+
+void async_boot_finish(struct libusb_transfer* xfr) {
+	async_done = true;
+	return;
+}
 
 int second_stage_boot(libusb_device_handle *usb_device)
 {
 	int size, retcode = 0;
 
-	size = ep_write(&boot_message, sizeof(boot_message), usb_device);
+	/*size = ep_write(&boot_message, sizeof(boot_message), usb_device);
 	if (size != sizeof(boot_message))
 	{
 		log_info("Failed to write correct length, returned %d\n", size);
 		return -1;
-	}
+	}*/
 
-	log_info("Writing %d bytes\n", boot_message.length);
+	/*log_info("Writing %d bytes\n", boot_message.length);
 	size = ep_write(second_stage_txbuf, boot_message.length, usb_device);
 	if (size != boot_message.length)
 	{
 		log_info("Failed to read correct length, returned %d\n", size);
 		return -1;
-	}
+	}*/
 
 	sleep(1);
 	size = ep_read((unsigned char *)&retcode, sizeof(retcode), usb_device);
@@ -168,7 +288,8 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 			log_info("Could not open USB device!\n");
 		} else {
 			log_info("Found device!\n");
-
+			usbboot_init_raspi(handle);
+			async_boot_start(handle);
 		}
 	} else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
 		if(handle) {
@@ -184,6 +305,7 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 }
 
 static libusb_hotplug_callback_handle callback;
+static struct timeval zero_tv;
 
 int usbboot_init() {
 	libusb_init(NULL);
@@ -198,18 +320,17 @@ int usbboot_init() {
 	FILE* fp = fopen(bootcode,"rb");
 	second_stage_prep(fp, NULL);
 	for(;;) {
-		libusb_handle_events(NULL);
-		if(handle) {
-			usbboot_init_raspi(handle);
+		libusb_handle_events_timeout_completed(NULL,&zero_tv,NULL);
+		if(handle && async_done) {
 			if(desc.iSerialNumber == 0 || desc.iSerialNumber == 3) {
 				second_stage_boot(handle);
+				libusb_close(handle);
+				handle = NULL;
 			}
-			libusb_close(handle);
-			handle = NULL;
 		}
 	}
 }
 
-void usbboot_shutdown() {
+void usbboot_exit() {
 	libusb_exit (NULL);
 }

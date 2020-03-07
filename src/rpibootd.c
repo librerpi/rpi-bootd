@@ -14,6 +14,7 @@ void init_rpibootd() {
 }
 
 void exit_rpibootd() {
+	usbboot_exit();
 	exit_logging();
 }
 
