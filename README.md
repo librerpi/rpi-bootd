@@ -7,7 +7,8 @@ This is an in-development boot server for the raspberry pi that manages USB boot
 2. UART console I/O via telnet
 3. UART kernel loading using the raspbootin or bootboot protocol
 4. With DTR of a USB FTDI device connected to RUN on the raspi, reset via SIGHUP
-5. Seperate monitor interface via telnet
-6. Programmatic usage of the monitor and console
-7. GDB support, extracting GDB packets for a seperate TCP socket
-8. Support for halting the raspi without resetting
+5. Reset USB device via cycling power on USB port
+6. Seperate monitor interface via telnet
+7. Programmatic usage of the monitor and console
+8. GDB support, extracting GDB packets for a seperate TCP socket
+9. Support for halting the raspi without resetting

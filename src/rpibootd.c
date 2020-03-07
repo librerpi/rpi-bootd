@@ -2,16 +2,19 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <string.h>
+#include <stdarg.h>
+#include <utils.h>
+#include <usbboot.h>
 
-bool  is_daemon  = true;
-bool  verbose = false;
-char* uart_device = "/dev/ttyUSB0";
-char* log_file    = "./rpibootd.log";
+void init_rpibootd() {
+	init_logging();
+	if(is_daemon) daemonize();
+	usbboot_init();
+}
 
-void daemonize() {
+void exit_rpibootd() {
+	exit_logging();
 }
 
 void usage() {
@@ -25,6 +28,8 @@ void usage() {
 	printf("\t    e.g -d /dev/ttyUSB0\n");
 	printf("\t -l file\n");
 	printf("\t    set name of log file\n");
+	printf("\t -b bootcode.bin\n");
+	printf("\t    specify which bootcode.bin file to send\n");
 }
 
 int main(int argc, char** argv) {
@@ -49,10 +54,17 @@ int main(int argc, char** argv) {
 				log_file = malloc(strlen(optarg)+1);
 				sprintf(log_file, "%s", log_file);
 			break;
+			case 'b':
+				bootcode = malloc(strlen(optarg)+1);
+				sprintf(bootcode, "%s", bootcode);
+			break;
 		}
 	}
-	// TODO: worker thread pool
-	usbboot_init();
-	for(;;);
+	char* uart_dev_path = realpath(uart_device, NULL);
+	uart_device         = uart_dev_path;
 
+	char* bootcode_path = realpath(bootcode, NULL);
+	bootcode            = bootcode_path;
+	// TODO: worker thread pool
+	init_rpibootd();
 }

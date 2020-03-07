@@ -1,6 +1,7 @@
 #include <libusb-1.0/libusb.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <utils.h>
 
 #define RASPI_VENDOR_ID 0x0a5c
 #define LIBUSB_MAX_TRANSFER (16 * 1024)
@@ -188,7 +189,8 @@ int usbboot_init() {
 					LIBUSB_HOTPLUG_MATCH_ANY,
 					LIBUSB_HOTPLUG_MATCH_ANY, usbboot_hotplug_cb, NULL, &callback);
 
-	FILE* fp = fopen("bootcode.bin","rb");
+
+	FILE* fp = fopen(bootcode,"rb");
 	second_stage_prep(fp, NULL);
 	for(;;) {
 		libusb_handle_events(NULL);

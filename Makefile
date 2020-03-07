@@ -7,7 +7,7 @@ clean:
 	rm -f rpibootd
 
 src/%.o: src/%.c
-	$(CC) -c -I/usr/local/include -Iinclude/ $< -o $@
+	$(CC) -c -g -I/usr/local/include -Iinclude/ $< -o $@
 
-rpibootd: src/rpibootd.o src/usbboot.o
-	$(CC) -L/usr/local/lib -lusb-1.0 $^ -o $@
+rpibootd: src/rpibootd.o src/utils.o src/usbboot.o
+	$(CC) -g -L/usr/local/lib -lusb-1.0 $^ -o $@
