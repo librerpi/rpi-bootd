@@ -290,15 +290,16 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 			log_info("Could not open USB device!\n");
 		} else {
 			log_info("Found device!\n");
-			usbboot_init_raspi(handle);
-			if(desc.iSerialNumber ==0 || desc.iSerialNumber == 3) async_boot_start(handle);
+			if(!async_done) {
+				usbboot_init_raspi(handle);
+				if(desc.iSerialNumber ==0 || desc.iSerialNumber == 3) async_boot_start(handle);
+			}
 		}
 	} else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
-		if(handle) {
 			log_info( "Closing device!\n");
-			libusb_close(handle);
+			if(handle) libusb_close(handle);
 			handle = NULL;
-		}
+			async_done = false;
 	} else {
 		log_info("Unknown event %d\n", event);
 	}
@@ -333,7 +334,7 @@ int usbboot_init(struct event_base* base) {
 
 	struct timeval tv;
 	tv.tv_sec = 0;
-	tv.tv_usec = 1;
+	tv.tv_usec = 0;
 
 	struct event* usb_cb_ev = evtimer_new(base, timer_libusb_cb, event_self_cbarg());
 	evtimer_add(usb_cb_ev, &tv);
