@@ -1,4 +1,6 @@
 #include <libusb-1.0/libusb.h>
+#include <event2/event.h>
+#include <event2/util.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <utils.h>
@@ -233,7 +235,7 @@ int second_stage_boot(libusb_device_handle *usb_device)
 		return -1;
 	}*/
 
-	sleep(1);
+//	sleep(1);
 	size = ep_read((unsigned char *)&retcode, sizeof(retcode), usb_device);
 
 	if (size > 0 && retcode == 0)
@@ -289,7 +291,7 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 		} else {
 			log_info("Found device!\n");
 			usbboot_init_raspi(handle);
-			async_boot_start(handle);
+			if(desc.iSerialNumber ==0 || desc.iSerialNumber == 3) async_boot_start(handle);
 		}
 	} else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
 		if(handle) {
@@ -307,8 +309,37 @@ static int LIBUSB_CALL usbboot_hotplug_cb(libusb_context *ctx, libusb_device *de
 static libusb_hotplug_callback_handle callback;
 static struct timeval zero_tv;
 
-int usbboot_init() {
+void timer_libusb_cb(evutil_socket_t fd, short what, void* arg) {
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	libusb_handle_events_timeout_completed(NULL,&tv,NULL);
+	evtimer_add((struct event*)arg,&tv);
+		if(handle && async_done) {
+			if(desc.iSerialNumber == 0 || desc.iSerialNumber == 3) {
+				second_stage_boot(handle);
+				libusb_close(handle);
+				handle = NULL;
+			}
+		}
+
+
+}
+
+
+
+int usbboot_init(struct event_base* base) {
 	libusb_init(NULL);
+
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 1;
+
+	struct event* usb_cb_ev = evtimer_new(base, timer_libusb_cb, event_self_cbarg());
+	evtimer_add(usb_cb_ev, &tv);
+
+	FILE* fp = fopen(bootcode,"rb");
+	second_stage_prep(fp, NULL);
 
 	libusb_hotplug_register_callback(NULL,LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
 					LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT, 0,
@@ -317,18 +348,11 @@ int usbboot_init() {
 					LIBUSB_HOTPLUG_MATCH_ANY, usbboot_hotplug_cb, NULL, &callback);
 
 
-	FILE* fp = fopen(bootcode,"rb");
+/*	FILE* fp = fopen(bootcode,"rb");
 	second_stage_prep(fp, NULL);
 	for(;;) {
 		libusb_handle_events_timeout_completed(NULL,&zero_tv,NULL);
-		if(handle && async_done) {
-			if(desc.iSerialNumber == 0 || desc.iSerialNumber == 3) {
-				second_stage_boot(handle);
-				libusb_close(handle);
-				handle = NULL;
-			}
-		}
-	}
+	}*/
 }
 
 void usbboot_exit() {

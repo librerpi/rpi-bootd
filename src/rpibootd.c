@@ -6,11 +6,18 @@
 #include <stdarg.h>
 #include <utils.h>
 #include <usbboot.h>
+#include <event2/event.h>
+
+unsigned int portnum = 1337;
+
+struct event_base* base;
 
 void init_rpibootd() {
 	init_logging();
 	if(is_daemon) daemonize();
-	usbboot_init();
+	base = event_base_new();
+	
+	usbboot_init(base);
 }
 
 void exit_rpibootd() {
@@ -19,7 +26,7 @@ void exit_rpibootd() {
 }
 
 void usage() {
-	printf("rpibootd [-D] [-v] [-h] [-d device] [-l file]\n");
+	printf("rpibootd [-D] [-v] [-h] [-d device] [-l file] [-p port]\n");
 	printf("\n");
 	printf("\t -D start in debug mode, do not detach from terminal\n");
 	printf("\t -v verbose logging\n");
@@ -31,11 +38,14 @@ void usage() {
 	printf("\t    set name of log file\n");
 	printf("\t -b bootcode.bin\n");
 	printf("\t    specify which bootcode.bin file to send\n");
+	printf("\t -p port\n");
+	printf("\t    specify TCP port to listen on for console\n");
 }
 
 int main(int argc, char** argv) {
+
 	int c;
-	while ((c = getopt(argc, argv, "Dvhd:l:")) != -1) {
+	while ((c = getopt(argc, argv, "Dvhd:l:p:")) != -1) {
 		switch(c) {
 			case 'D':
 				is_daemon = false;
@@ -59,6 +69,9 @@ int main(int argc, char** argv) {
 				bootcode = malloc(strlen(optarg)+1);
 				sprintf(bootcode, "%s", bootcode);
 			break;
+			case 'p':
+				portnum = atoi(optarg);
+			break;
 		}
 	}
 	char* uart_dev_path = realpath(uart_device, NULL);
@@ -68,4 +81,8 @@ int main(int argc, char** argv) {
 	bootcode            = bootcode_path;
 	// TODO: worker thread pool
 	init_rpibootd();
+
+	for(;;) {
+		event_base_loop(base,EVLOOP_NONBLOCK);
+	}
 }
