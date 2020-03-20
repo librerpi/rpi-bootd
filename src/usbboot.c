@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <utils.h>
 #include <unistd.h>
+#include <sys/epoll.h>
+
 
 #define RASPI_VENDOR_ID 0x0a5c
 #define LIBUSB_MAX_TRANSFER (16 * 1024)
@@ -315,6 +317,7 @@ void timer_libusb_cb(evutil_socket_t fd, short what, void* arg) {
 	tv.tv_sec = 0;
 	tv.tv_usec = 0;
 	libusb_handle_events_timeout_completed(NULL,&tv,NULL);
+	libusb_get_next_timeout(NULL,&tv);
 	evtimer_add((struct event*)arg,&tv);
 		if(handle && async_done) {
 			if(desc.iSerialNumber == 0 || desc.iSerialNumber == 3) {
@@ -332,12 +335,27 @@ void timer_libusb_cb(evutil_socket_t fd, short what, void* arg) {
 int usbboot_init(struct event_base* base) {
 	libusb_init(NULL);
 
-	struct timeval tv;
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
+	int libusb_fd;
+	libusb_fd = epoll_create(1);
 
-	struct event* usb_cb_ev = evtimer_new(base, timer_libusb_cb, event_self_cbarg());
-	evtimer_add(usb_cb_ev, &tv);
+	const struct libusb_pollfd** libusb_fds = libusb_get_pollfds(NULL);
+
+	struct epoll_event fd_epoll_ev;
+
+	for(const struct libusb_pollfd** pollfd = libusb_fds; *pollfd != NULL; pollfd++) {
+		epoll_ctl(libusb_fd,EPOLL_CTL_ADD, (*pollfd)->fd, &fd_epoll_ev);
+	}
+
+	libusb_free_pollfds(libusb_fds);
+
+	struct timeval tv;
+	libusb_get_next_timeout(NULL,&tv);
+
+	struct event* usb_cb_ev = event_new(base, libusb_fd, EV_TIMEOUT|EV_WRITE|EV_READ, timer_libusb_cb, event_self_cbarg());	
+	event_add(usb_cb_ev, &tv);
+
+//	struct event* usb_cb_ev = evtimer_new(base, timer_libusb_cb, event_self_cbarg());
+//	evtimer_add(usb_cb_ev, &tv);
 
 	FILE* fp = fopen(bootcode,"rb");
 	second_stage_prep(fp, NULL);

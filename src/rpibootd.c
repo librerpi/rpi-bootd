@@ -83,6 +83,6 @@ int main(int argc, char** argv) {
 	init_rpibootd();
 
 	for(;;) {
-		event_base_loop(base,EVLOOP_NONBLOCK);
+		event_base_dispatch(base);
 	}
 }
